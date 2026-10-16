@@ -29,6 +29,7 @@ public class GameReporter : MonoBehaviour
 
     record Player(string Name, int Color, bool IsDead, bool Disconnected);
 
+    Galactus? reportingTo;
     int connections;
     Phase? lastPhase;
     Lobby? lastLobby;
@@ -50,9 +51,10 @@ public class GameReporter : MonoBehaviour
         var galactus = CapturePlugin.Galactus;
         if (galactus is null || !galactus.Connected) return;
 
-        var resend = galactus.Connections != connections;
+        var resend = galactus != reportingTo || galactus.Connections != connections;
         if (resend)
         {
+            reportingTo = galactus;
             connections = galactus.Connections;
             lastPhase = null;
             lastLobby = null;

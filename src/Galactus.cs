@@ -16,7 +16,7 @@ public sealed class Galactus
 {
     static readonly TimeSpan MinRetry = TimeSpan.FromSeconds(1), MaxRetry = TimeSpan.FromSeconds(30);
 
-    readonly CaptureLink link;
+    public CaptureLink Link { get; }
     readonly string version;
     readonly Action<string> log;
     readonly CancellationTokenSource stop = new();
@@ -25,7 +25,7 @@ public sealed class Galactus
 
     public Galactus(CaptureLink link, string version, Action<string> log)
     {
-        this.link = link;
+        Link = link;
         this.version = version;
         this.log = log;
     }
@@ -37,7 +37,8 @@ public sealed class Galactus
     public int Connections => Volatile.Read(ref connections);
 
     // A replaced Capture must never reconnect, or two Captures would replace each other forever.
-    public bool Replaced { get; private set; }
+    public bool Replaced => replaced;
+    volatile bool replaced;
 
     public void Start() => _ = Task.Run(RunAsync);
 
@@ -89,7 +90,7 @@ public sealed class Galactus
     {
         using var socket = new ClientWebSocket();
         var query = $"EIO=3&transport=websocket&kind=capture-mod&version={Uri.EscapeDataString(version)}";
-        await socket.ConnectAsync(new Uri(link.Galactus, "/socket.io/?" + query), ct);
+        await socket.ConnectAsync(new Uri(Link.Galactus, "/socket.io/?" + query), ct);
 
         using var connection = CancellationTokenSource.CreateLinkedTokenSource(ct);
         var packets = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
@@ -120,10 +121,10 @@ public sealed class Galactus
                 {
                     // Connected to the default namespace. The Connect Code goes first, so Galactus knows which game
                     // everything after it belongs to.
-                    packets.Writer.TryWrite("42" + JsonSerializer.Serialize(new[] { "connectCode", link.ConnectCode }));
+                    packets.Writer.TryWrite("42" + JsonSerializer.Serialize(new[] { "connectCode", Link.ConnectCode }));
                     outbox = packets;
                     Interlocked.Increment(ref connections);
-                    log($"Connected to Galactus at {link.Galactus.Authority}");
+                    log($"Connected to Galactus at {Link.Galactus.Authority}");
                 }
                 else if (packet.StartsWith("41"))
                 {
@@ -131,7 +132,7 @@ public sealed class Galactus
                 }
                 else if (packet.StartsWith("42") && EventName(packet) == "killself")
                 {
-                    Replaced = true;
+                    replaced = true;
                     return;
                 }
             }

@@ -8,7 +8,9 @@ It supports the latest Steam release of Among Us (currently 2026.9.29) on BepInE
 
 1. Put `AutoMuteUsCapture.dll` in `BepInEx/plugins`.
 2. Start a game in Discord with `/new` and copy the `aucapture://` link it posts.
-3. Set `CaptureLink` in `BepInEx/config/us.automute.capture.cfg` to that link, then start Among Us.
+3. In Among Us, press **Paste capture link** in the bottom-left corner of the main menu or lobby.
+
+The status line under the button shows whether the bot is connected: green when it is, amber while connecting, red when it isn't. The link is remembered, so restarting the game reconnects to the same bot game. Pasting a link closes any Capture App connected to that game, since only one capture can report a game at a time.
 
 ## Build
 

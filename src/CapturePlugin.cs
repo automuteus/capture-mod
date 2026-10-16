@@ -1,5 +1,6 @@
 using BepInEx;
 using BepInEx.Configuration;
+using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
 using HarmonyLib;
 
@@ -11,22 +12,32 @@ public class CapturePlugin : BasePlugin
 {
     internal static Galactus? Galactus;
 
-    ConfigEntry<string> captureLink = null!;
+    static ConfigEntry<string> captureLink = null!;
+    static ManualLogSource log = null!;
 
     public override void Load()
     {
+        log = Log;
+        // Remembered so a restarted game reconnects to the same bot game. A link whose game has ended does no harm:
+        // Galactus accepts it, and nothing happens until a bot game claims the code.
         captureLink = Config.Bind("Capture", "CaptureLink", "",
-            "The aucapture:// link the bot posts when you start a game with /new.");
+            "The aucapture:// link the bot posts when you start a game with /new. Set by the Paste capture link button.");
         AddComponent<GameReporter>();
+        AddComponent<CaptureLinkButton>();
         new Harmony(MyPluginInfo.PLUGIN_GUID).PatchAll();
 
         var link = CaptureLink.Parse(captureLink.Value);
-        if (link is null)
-        {
-            Log.LogWarning("No valid capture link in the config; set CaptureLink to the aucapture:// link from /new");
-            return;
-        }
-        Galactus = new Galactus(link, MyPluginInfo.PLUGIN_VERSION, Log.LogInfo);
+        if (link is not null) Connect(link);
+    }
+
+    // Connects to the bot game a Capture Link names, in place of whatever this was connected to.
+    internal static void Connect(CaptureLink link)
+    {
+        if (Galactus is { Replaced: false } current && current.Link == link) return;
+
+        Galactus?.Stop();
+        captureLink.Value = link.ToString();
+        Galactus = new Galactus(link, MyPluginInfo.PLUGIN_VERSION, log.LogInfo);
         Galactus.Start();
     }
 }

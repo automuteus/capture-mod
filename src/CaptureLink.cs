@@ -18,4 +18,8 @@ public sealed record CaptureLink(Uri Galactus, string ConnectCode)
         var insecure = uri.Query.Contains("insecure") && !uri.Query.Contains("insecure=false");
         return new CaptureLink(new Uri((insecure ? "ws://" : "wss://") + uri.Authority), code);
     }
+
+    // Back to the link the bot posted, so it can be saved and parsed again.
+    public override string ToString() =>
+        $"aucapture://{Galactus.Authority}/{ConnectCode}{(Galactus.Scheme == "ws" ? "?insecure" : "")}";
 }
