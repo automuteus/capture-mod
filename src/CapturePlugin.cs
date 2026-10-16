@@ -1,6 +1,7 @@
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Unity.IL2CPP;
+using HarmonyLib;
 
 namespace CaptureMod;
 
@@ -17,6 +18,7 @@ public class CapturePlugin : BasePlugin
         captureLink = Config.Bind("Capture", "CaptureLink", "",
             "The aucapture:// link the bot posts when you start a game with /new.");
         AddComponent<GameReporter>();
+        new Harmony(MyPluginInfo.PLUGIN_GUID).PatchAll();
 
         var link = CaptureLink.Parse(captureLink.Value);
         if (link is null)

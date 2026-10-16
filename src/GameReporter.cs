@@ -1,7 +1,10 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AmongUs.Data;
+using Il2CppInterop.Runtime.Attributes;
 using InnerNet;
 using UnityEngine;
 
@@ -19,11 +22,24 @@ public class GameReporter : MonoBehaviour
 
     static readonly Regex LobbyCodePattern = new("^[A-Z]{4}$|^[A-Z]{6}$");
 
+    // What happened to a player, by the numbers Galactus expects.
+    enum PlayerAction { Joined, Left, Died, ChangedColor, ForceUpdated, Disconnected, Exiled }
+
     record Lobby(string LobbyCode, int Region, int Map);
+
+    record Player(string Name, int Color, bool IsDead, bool Disconnected);
 
     int connections;
     Phase? lastPhase;
     Lobby? lastLobby;
+    readonly Dictionary<byte, Player> players = new();
+    // Exiled players, who the game only marks dead once the exile animation ends. They were reported dead when the
+    // meeting closed, so their death mustn't be reported again as a kill.
+    readonly HashSet<byte> exiled = new();
+    readonly HashSet<byte> present = new();
+    // Who the vote is exiling, read while the meeting shows its results: the meeting can be gone by the first frame
+    // the game is back to tasks.
+    byte? exiling;
 
     public GameReporter(IntPtr ptr) : base(ptr)
     {
@@ -34,16 +50,24 @@ public class GameReporter : MonoBehaviour
         var galactus = CapturePlugin.Galactus;
         if (galactus is null || !galactus.Connected) return;
 
-        if (galactus.Connections != connections)
+        var resend = galactus.Connections != connections;
+        if (resend)
         {
             connections = galactus.Connections;
             lastPhase = null;
             lastLobby = null;
+            players.Clear();
         }
 
         var phase = CurrentPhase();
         if (phase != lastPhase)
         {
+            // Reported before the phase, so the bot already counts the exiled player as dead when it applies the
+            // tasks phase's mutes.
+            if (lastPhase == Phase.Discussion && phase == Phase.Tasks) ReportExile(galactus);
+            if (phase is Phase.Lobby or Phase.Menu) exiled.Clear();
+            exiling = null;
+
             galactus.Emit("state", ((int)phase).ToString());
             lastPhase = phase;
         }
@@ -54,7 +78,81 @@ public class GameReporter : MonoBehaviour
             galactus.Emit("lobby", JsonSerializer.Serialize(lobby));
             lastLobby = lobby;
         }
+
+        if (phase == Phase.Discussion)
+        {
+            var meeting = MeetingHud.Instance;
+            var player = meeting == null ? null : meeting.exiledPlayer;
+            if (player != null) exiling = player.PlayerId;
+        }
+
+        ReportPlayers(galactus, resend);
     }
+
+    [HideFromIl2Cpp]
+    void ReportExile(Galactus galactus)
+    {
+        if (exiling is not { } id || !players.TryGetValue(id, out var known)) return;
+
+        exiled.Add(id);
+        players[id] = known with { IsDead = true };
+        EmitPlayer(galactus, PlayerAction.Exiled, players[id]);
+    }
+
+    [HideFromIl2Cpp]
+    void ReportPlayers(Galactus galactus, bool resend)
+    {
+        present.Clear();
+        var data = GameData.Instance;
+        if (data != null)
+        {
+            var all = data.AllPlayers;
+            for (var i = 0; i < all.Count; i++)
+            {
+                var info = all[i];
+                // A joining player has no name or outfit until the game has their details.
+                if (info == null || info.IsIncomplete || string.IsNullOrEmpty(info.PlayerName)) continue;
+
+                var id = info.PlayerId;
+                var now = new Player(info.PlayerName, info.DefaultOutfit.ColorId, info.IsDead || exiled.Contains(id),
+                    info.Disconnected);
+                present.Add(id);
+
+                if (!players.TryGetValue(id, out var before) || before.Name != now.Name)
+                {
+                    if (before is not null) EmitPlayer(galactus, PlayerAction.Left, before);
+                    EmitPlayer(galactus, resend ? PlayerAction.ForceUpdated : PlayerAction.Joined, now);
+                }
+                else
+                {
+                    // An exile the meeting didn't name, e.g. if the meeting closed before it was read, is still an exile.
+                    if (now.IsDead && !before.IsDead)
+                        EmitPlayer(galactus, info.WasEjected ? PlayerAction.Exiled : PlayerAction.Died, now);
+                    if (now.Color != before.Color) EmitPlayer(galactus, PlayerAction.ChangedColor, now);
+                    if (now.Disconnected && !before.Disconnected)
+                        EmitPlayer(galactus, PlayerAction.Disconnected, now);
+                }
+                players[id] = now;
+            }
+        }
+
+        if (players.Count == present.Count) return;
+        foreach (var id in players.Keys.Where(id => !present.Contains(id)).ToList())
+        {
+            EmitPlayer(galactus, PlayerAction.Left, players[id]);
+            players.Remove(id);
+        }
+    }
+
+    static void EmitPlayer(Galactus galactus, PlayerAction action, Player player) =>
+        galactus.Emit("player", JsonSerializer.Serialize(new
+        {
+            Action = (int)action,
+            player.Name,
+            player.IsDead,
+            player.Disconnected,
+            player.Color
+        }));
 
     static Phase CurrentPhase()
     {
