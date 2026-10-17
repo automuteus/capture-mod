@@ -116,6 +116,8 @@ public class GameReporter : MonoBehaviour
                 if (info == null || info.IsIncomplete || string.IsNullOrEmpty(info.PlayerName)) continue;
 
                 var id = info.PlayerId;
+                // Once the game has caught up with an exile, it's the one to say whether the player is still dead.
+                if (info.IsDead) exiled.Remove(id);
                 var now = new Player(info.PlayerName, info.DefaultOutfit.ColorId, info.IsDead || exiled.Contains(id),
                     info.Disconnected);
                 present.Add(id);
@@ -130,6 +132,10 @@ public class GameReporter : MonoBehaviour
                     // An exile the meeting didn't name, e.g. if the meeting closed before it was read, is still an exile.
                     if (now.IsDead && !before.IsDead)
                         EmitPlayer(galactus, info.WasEjected ? PlayerAction.Exiled : PlayerAction.Died, now);
+                    // Role mods can bring players back, like Town of Us's Altruist. The bot has no action for that,
+                    // and takes the update as it would after a reconnect.
+                    else if (!now.IsDead && before.IsDead)
+                        EmitPlayer(galactus, PlayerAction.ForceUpdated, now);
                     if (now.Color != before.Color) EmitPlayer(galactus, PlayerAction.ChangedColor, now);
                     if (now.Disconnected && !before.Disconnected)
                         EmitPlayer(galactus, PlayerAction.Disconnected, now);
