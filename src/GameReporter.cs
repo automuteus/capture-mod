@@ -27,7 +27,9 @@ public class GameReporter : MonoBehaviour
 
     record Lobby(string LobbyCode, int Region, int Map);
 
-    record Player(string Name, int Color, bool IsDead, bool Disconnected);
+    // FriendCode is the account's Friend Code, like "coolbean#1234". Unlike the name it's unique, so the bot can tell
+    // who a player is even after they change their name. Empty when the game doesn't have it.
+    record Player(string Name, int Color, bool IsDead, bool Disconnected, string FriendCode);
 
     Galactus? reportingTo;
     int connections;
@@ -119,7 +121,7 @@ public class GameReporter : MonoBehaviour
                 // Once the game has caught up with an exile, it's the one to say whether the player is still dead.
                 if (info.IsDead) exiled.Remove(id);
                 var now = new Player(info.PlayerName, info.DefaultOutfit.ColorId, info.IsDead || exiled.Contains(id),
-                    info.Disconnected);
+                    info.Disconnected, info.FriendCode ?? "");
                 present.Add(id);
 
                 if (!players.TryGetValue(id, out var before) || before.Name != now.Name)
@@ -135,6 +137,9 @@ public class GameReporter : MonoBehaviour
                     // Role mods can bring players back, like Town of Us's Altruist. The bot has no action for that,
                     // and takes the update as it would after a reconnect.
                     else if (!now.IsDead && before.IsDead)
+                        EmitPlayer(galactus, PlayerAction.ForceUpdated, now);
+                    // The game can fill in a Friend Code after the player first appears. Resend them so the bot learns it.
+                    else if (now.FriendCode != before.FriendCode)
                         EmitPlayer(galactus, PlayerAction.ForceUpdated, now);
                     if (now.Color != before.Color) EmitPlayer(galactus, PlayerAction.ChangedColor, now);
                     if (now.Disconnected && !before.Disconnected)
@@ -159,7 +164,8 @@ public class GameReporter : MonoBehaviour
             player.Name,
             player.IsDead,
             player.Disconnected,
-            player.Color
+            player.Color,
+            player.FriendCode
         }));
 
     static Phase CurrentPhase()
